@@ -1,15 +1,20 @@
 #!/bin/bash
 
-# Create virtual environment
-python3 -m venv venv
+# Fix PATH
+echo 'export PATH="$PATH:/usr/local/bin"' >> ~/.bashrc
+source ~/.bashrc
 
-# Activate virtual environment
-source venv/bin/activate
+# Update package list
+apt update
 
-# Upgrade pip
-pip install --upgrade pip
+# Install pip3 if not available
+if ! command -v pip3 &> /dev/null; then
+    apt install -y python3-pip
+fi
 
-# Install dependencies
-pip install -r requirements.txt
+# Install/upgrade required packages
+pip3 install --upgrade pip
+pip3 install -r requirements.txt
 
-echo "Setup complete! Activate virtual environment with: source venv/bin/activate"
+echo "Setup completed successfully!"
+
