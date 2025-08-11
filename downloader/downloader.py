@@ -18,14 +18,14 @@ class FileDownloader:
         s = requests.Session()
         retry = Retry(
             total=self.config.retry_attempts,
-            backoff_factor=2.0,
+            backoff_factor=1.5,  # Increased backoff
             status_forcelist=[429, 500, 502, 503, 504],
             raise_on_status=False
         )
         adapter = HTTPAdapter(
             max_retries=retry,
-            pool_connections=32,
-            pool_maxsize=32
+            pool_connections=20,
+            pool_maxsize=20
         )
         s.mount('http://', adapter)
         s.mount('https://', adapter)
@@ -35,13 +35,16 @@ class FileDownloader:
         """Extract filename from Content-Disposition header or URL"""
         content_disposition = headers.get('content-disposition', '')
         if 'filename=' in content_disposition:
+            # Extract filename from Content-Disposition header
             filename_start = content_disposition.find('filename=')
             if filename_start != -1:
                 filename = content_disposition[filename_start + 9:]
+                # Handle quoted filenames
                 if filename.startswith('"') and filename.endswith('"'):
                     filename = filename[1:-1]
                 return unquote(filename)
         
+        # Fallback to URL-based extraction
         parsed = urlparse(url)
         name = os.path.basename(parsed.path)
         return unquote(name) if name else f"file_{int(time.time())}"
@@ -51,12 +54,17 @@ class FileDownloader:
         try:
             r = session.head(url, timeout=self.config.timeout, allow_redirects=True)
             r.raise_for_status()
+            
+            # Get filename from headers or URL
             filename = self._get_filename_from_headers(r.headers, url)
+            
             size = int(r.headers.get('content-length', 0))
             range_ok = 'bytes' in r.headers.get('Accept-Ranges', '')
+            
             logger.info(f"File info - Name: {filename}, Size: {size}, Range support: {range_ok}")
         except Exception as e:
-            logger.warning(f"Failed to get file info with HEAD: {e}")
+            logger.warning(f"Failed to get file info: {e}")
+            # Try GET request as fallback
             try:
                 r = session.get(url, timeout=self.config.timeout, stream=True)
                 r.raise_for_status()
@@ -70,6 +78,16 @@ class FileDownloader:
             session.close()
         return filename, size, range_ok
 
+    def _optimal_threads_chunk(self, size):
+        if size < 500 * 1024 * 1024:  # < 500MB
+            return 4, 512 * 1024
+        elif size < 2 * 1024 * 1024 * 1024:  # < 2GB
+            return 8, 1 * 1024 * 1024
+        elif size < 5 * 1024 * 1024 * 1024:  # < 5GB
+            return 12, 2 * 1024 * 1024
+        else:  # >= 5GB
+            return 16, 4 * 1024 * 1024
+
     def download(self, url, dest_dir):
         filename, size, range_ok = self.get_info(url)
         filepath = os.path.join(dest_dir, filename)
@@ -81,73 +99,26 @@ class FileDownloader:
             name, ext = os.path.splitext(original_filepath)
             filepath = f"{name}_{counter}{ext}"
             counter += 1
+        
+        threads, chunk_size = self._optimal_threads_chunk(size)
 
-        # Use 32 chunks for all files (except very small ones)
-        if size > 0 and range_ok and size > 10*1024*1024:  # > 10MB
-            return self._multi(url, filepath, size, 32, 1024*1024)  # 32 chunks, 1MB each
+        if size > 0 and range_ok and threads > 1:
+            return self._multi(url, filepath, size, threads, chunk_size)
         else:
-            return self._single_with_anti_throttling(url, filepath)
+            return self._single(url, filepath)
 
-    def _single_with_anti_throttling(self, url, filepath):
+    def _single(self, url, filepath):
         session = self._create_session()
         try:
             with session.get(url, stream=True, timeout=self.config.timeout) as r:
                 r.raise_for_status()
                 total_size = int(r.headers.get('content-length', 0))
                 progress = DownloadProgress(total_size, os.path.basename(filepath))
-                
-                downloaded = 0
-                last_downloaded = 0
-                last_time = time.time()
-                speed_history = []
-                throttle_detected = False
-                throttle_pause_done = False
-                
                 with open(filepath, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=64*1024):  # 64KB chunks
+                    for chunk in r.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
-                            downloaded += len(chunk)
                             progress.update(len(chunk))
-                            
-                            # Real-time speed monitoring
-                            current_time = time.time()
-                            if current_time - last_time >= 1.0:  # Check every second
-                                speed = (downloaded - last_downloaded) / (current_time - last_time)
-                                speed_history.append(speed)
-                                
-                                # Keep only last 5 speed measurements
-                                if len(speed_history) > 5:
-                                    speed_history.pop(0)
-                                
-                                # Detect throttling (speed dropped significantly)
-                                if len(speed_history) >= 3:
-                                    avg_speed = sum(speed_history[:-1]) / (len(speed_history) - 1)
-                                    if speed < avg_speed * 0.3 and speed < 1024 * 1024:  # Less than 30% of avg and < 1MB/s
-                                        if not throttle_detected:
-                                            logger.info(f"Throttling detected! Current speed: {speed/1024/1024:.2f} MB/s, Average: {avg_speed/1024/1024:.2f} MB/s")
-                                            throttle_detected = True
-                                
-                                last_downloaded = downloaded
-                                last_time = current_time
-                            
-                            # Specific percentage-based pause (anti-throttling)
-                            if total_size > 0:
-                                percentage = downloaded / total_size
-                                if percentage >= 0.92 and percentage < 0.94 and not throttle_pause_done:
-                                    logger.info(f"Anti-throttling: Strategic pause at {percentage:.1%}")
-                                    progress.close()
-                                    time.sleep(5)
-                                    # Create new progress bar after pause
-                                    progress = DownloadProgress(total_size, os.path.basename(filepath))
-                                    progress.update(downloaded)
-                                    logger.info("Resuming after strategic pause")
-                                    throttle_pause_done = True
-                                    # Reset speed monitoring after pause
-                                    speed_history = []
-                                    last_downloaded = downloaded
-                                    last_time = time.time()
-                
                 progress.close()
             logger.info(f"✓ {filepath}")
             return True
@@ -159,78 +130,74 @@ class FileDownloader:
 
     def _multi(self, url, filepath, size, threads, chunk_size):
         parts = self._make_chunks(size, threads)
-        completed_parts = [False] * len(parts)
-        part_progress = [0] * len(parts)
 
         def dl_chunk(idx, start, end):
-            # Create a new session for each chunk
+            # Create a new session for each chunk to avoid connection issues
             session = self._create_session()
             headers = {'Range': f'bytes={start}-{end}'}
             temp_filepath = f"{filepath}.part{idx}"
             
             try:
+                # Check if part already exists and is complete
+                if os.path.exists(temp_filepath):
+                    existing_size = os.path.getsize(temp_filepath)
+                    if existing_size == (end - start + 1):
+                        logger.info(f"Chunk {idx} already downloaded")
+                        # Update progress for existing chunk
+                        try:
+                            self.progress.update(existing_size)
+                        except:
+                            pass
+                        session.close()
+                        return True
+                    elif existing_size > 0:
+                        # Resume from where it left off
+                        headers['Range'] = f'bytes={start + existing_size}-{end}'
+                
                 with session.get(url, headers=headers, stream=True, timeout=self.config.timeout) as r:
                     r.raise_for_status()
-                    downloaded = 0
-                    last_downloaded = 0
-                    last_time = time.time()
-                    speed_history = []
-                    throttle_detected = False
-                    throttle_pause_done = False
-                    
-                    with open(temp_filepath, 'wb') as f:
-                        for chunk in r.iter_content(chunk_size=64*1024):  # 64KB chunks
+                    mode = 'ab' if os.path.exists(temp_filepath) else 'wb'
+                    with open(temp_filepath, mode) as f:
+                        for chunk in r.iter_content(chunk_size=64*1024):  # Larger chunk size for better throughput
                             if chunk:
                                 f.write(chunk)
-                                downloaded += len(chunk)
-                                part_progress[idx] = downloaded
-                                
                                 try:
                                     self.progress.update(len(chunk))
                                 except:
                                     pass
-                                
-                                # Real-time speed monitoring for chunks too
-                                current_time = time.time()
-                                if current_time - last_time >= 1.0:
-                                    speed = (downloaded - last_downloaded) / (current_time - last_time)
-                                    speed_history.append(speed)
-                                    
-                                    if len(speed_history) > 5:
-                                        speed_history.pop(0)
-                                    
-                                    if len(speed_history) >= 3:
-                                        avg_speed = sum(speed_history[:-1]) / (len(speed_history) - 1)
-                                        if speed < avg_speed * 0.3 and speed < 512 * 1024:  # Throttling detection
-                                            if not throttle_detected:
-                                                logger.info(f"Chunk {idx} throttling detected! Speed: {speed/1024:.0f} KB/s")
-                                                throttle_detected = True
-                                    
-                                    last_downloaded = downloaded
-                                    last_time = current_time
-                                
-                                # Anti-throttling pause for chunks at 92-94%
-                                chunk_size_bytes = end - start + 1
-                                if chunk_size_bytes > 0:
-                                    percentage = downloaded / chunk_size_bytes
-                                    if percentage >= 0.92 and percentage < 0.94 and not throttle_pause_done:
-                                        logger.info(f"Chunk {idx}: Anti-throttling pause at {percentage:.1%}")
-                                        time.sleep(3)
-                                        throttle_pause_done = True
-                    
-                    completed_parts[idx] = True
-                    return True
+                return True
             except Exception as e:
                 logger.warning(f"Chunk {idx} failed: {e}")
                 return False
             finally:
                 session.close()
 
-        # Create progress bar with custom format that shows real-time speed
         self.progress = DownloadProgress(size, os.path.basename(filepath))
-        
         try:
-            with ThreadPoolExecutor(max_workers=min(threads, 16)) as ex:  # Cap at 16 concurrent workers
+            with ThreadPoolExecutor(max_workers=min(threads, 8)) as ex:  # Reduced max workers
                 results = list(ex.map(lambda c: dl_chunk(*c), parts))
         finally:
             self.progress.close()
+
+        if all(results):
+            self._merge(filepath, len(parts))
+            return True
+        return False
+
+    def _make_chunks(self, size, threads):
+        step = size // threads
+        return [(i, i * step, (i + 1) * step - 1 if i < threads - 1 else size - 1) for i in range(threads)]
+
+    def _merge(self, filepath, parts):
+        try:
+            with open(filepath, 'wb') as out:
+                for i in range(parts):
+                    part_file = f"{filepath}.part{i}"
+                    if os.path.exists(part_file):
+                        with open(part_file, 'rb') as pf:
+                            out.write(pf.read())
+                        os.remove(part_file)
+            logger.info(f"Merged {parts} parts into {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to merge file parts: {e}")
+            raise
