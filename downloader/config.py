@@ -14,11 +14,11 @@ class DownloadConfig:
 
 def load_config() -> DownloadConfig:
     defaults = {
-        "links_file": "list.txt",
-        "download_dir": "downloads",
-        "max_concurrent_downloads": 3,  # Reduced to prevent overwhelming server
+        "links_file": "/mnt/6tb/MYT/Anime/Download/list.txt",  # Updated to your path
+        "download_dir": "/mnt/6tb/MYT/Anime/Download",  # Updated to your path
+        "max_concurrent_downloads": 1,  # Reduced to prevent server throttling
         "timeout": 120,  # Increased timeout
-        "retry_attempts": 3  # Reduced retries to prevent hanging
+        "retry_attempts": 3  # Reduced but with better backoff
     }
 
     if not os.path.exists(CONFIG_FILE):
