@@ -30,8 +30,8 @@ class DownloadManager:
     def _links(self):
         if not os.path.exists(self.config.links_file):
             with open(self.config.links_file, 'w') as f:
-                f.write("# One URL per line
-")
+                f.write("# One URL per line")
+                
             return []
         with open(self.config.links_file, 'r') as f:
             return [line.strip() for line in f if line.strip() and not line.startswith("#")]
