@@ -30,6 +30,22 @@ class DownloadManager:
                 logger.info(f"Completed: {link}")
             else:
                 logger.error(f"Failed: {link}")
+                # Try one more time with single-threaded approach
+                logger.info(f"Retrying {link} with single-threaded approach...")
+                success = self._retry_single_threaded(link)
+                if success:
+                    logger.info(f"Retry successful: {link}")
+                else:
+                    logger.error(f"Retry also failed: {link}")
+
+    def _retry_single_threaded(self, url):
+        """Fallback method using single-threaded download with enhanced anti-throttling"""
+        try:
+            downloader = FileDownloader(self.config)
+            return downloader._single_with_anti_throttling(url, self.config.download_dir)
+        except Exception as e:
+            logger.error(f"Retry failed: {e}")
+            return False
 
     def _links(self):
         if not os.path.exists(self.config.links_file):
