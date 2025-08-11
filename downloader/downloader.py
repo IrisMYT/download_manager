@@ -43,13 +43,13 @@ class FileDownloader:
         return filename, size, range_ok
 
     def _optimal_threads_chunk(self, size):
-        if size < 500 * 1024 * 1024:        # < 500 MB
+        if size < 500 * 1024 * 1024:
             return 4, 512 * 1024
-        elif size < 2 * 1024 * 1024 * 1024: # < 2 GB
+        elif size < 2 * 1024 * 1024 * 1024:
             return 8, 1 * 1024 * 1024
-        elif size < 5 * 1024 * 1024 * 1024: # < 5 GB
+        elif size < 5 * 1024 * 1024 * 1024:
             return 16, 2 * 1024 * 1024
-        else:                               # >= 5 GB
+        else:
             return 32, 4 * 1024 * 1024
 
     def download(self, url, dest_dir):
@@ -66,7 +66,8 @@ class FileDownloader:
         try:
             with self.session.get(url, stream=True, timeout=self.config.timeout) as r:
                 r.raise_for_status()
-                progress = DownloadProgress(int(r.headers.get('content-length', 0)), os.path.basename(filepath))
+                total_size = int(r.headers.get('content-length', 0))
+                progress = DownloadProgress(total_size, os.path.basename(filepath))
                 with open(filepath, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         if chunk:
