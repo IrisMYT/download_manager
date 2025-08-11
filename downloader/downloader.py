@@ -231,3 +231,6 @@ class FileDownloader:
         
         try:
             with ThreadPoolExecutor(max_workers=min(threads, 16)) as ex:  # Cap at 16 concurrent workers
+                results = list(ex.map(lambda c: dl_chunk(*c), parts))
+        finally:
+            self.progress.close()
