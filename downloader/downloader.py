@@ -18,14 +18,14 @@ class FileDownloader:
         s = requests.Session()
         retry = Retry(
             total=self.config.retry_attempts,
-            backoff_factor=1.5,  # Increased backoff
+            backoff_factor=2.0,
             status_forcelist=[429, 500, 502, 503, 504],
             raise_on_status=False
         )
         adapter = HTTPAdapter(
             max_retries=retry,
-            pool_connections=20,
-            pool_maxsize=20
+            pool_connections=32,
+            pool_maxsize=32
         )
         s.mount('http://', adapter)
         s.mount('https://', adapter)
@@ -35,16 +35,13 @@ class FileDownloader:
         """Extract filename from Content-Disposition header or URL"""
         content_disposition = headers.get('content-disposition', '')
         if 'filename=' in content_disposition:
-            # Extract filename from Content-Disposition header
             filename_start = content_disposition.find('filename=')
             if filename_start != -1:
                 filename = content_disposition[filename_start + 9:]
-                # Handle quoted filenames
                 if filename.startswith('"') and filename.endswith('"'):
                     filename = filename[1:-1]
                 return unquote(filename)
         
-        # Fallback to URL-based extraction
         parsed = urlparse(url)
         name = os.path.basename(parsed.path)
         return unquote(name) if name else f"file_{int(time.time())}"
@@ -54,17 +51,12 @@ class FileDownloader:
         try:
             r = session.head(url, timeout=self.config.timeout, allow_redirects=True)
             r.raise_for_status()
-            
-            # Get filename from headers or URL
             filename = self._get_filename_from_headers(r.headers, url)
-            
             size = int(r.headers.get('content-length', 0))
             range_ok = 'bytes' in r.headers.get('Accept-Ranges', '')
-            
             logger.info(f"File info - Name: {filename}, Size: {size}, Range support: {range_ok}")
         except Exception as e:
             logger.warning(f"Failed to get file info: {e}")
-            # Try GET request as fallback
             try:
                 r = session.get(url, timeout=self.config.timeout, stream=True)
                 r.raise_for_status()
@@ -78,16 +70,6 @@ class FileDownloader:
             session.close()
         return filename, size, range_ok
 
-    def _optimal_threads_chunk(self, size):
-        if size < 500 * 1024 * 1024:  # < 500MB
-            return 4, 512 * 1024
-        elif size < 2 * 1024 * 1024 * 1024:  # < 2GB
-            return 8, 1 * 1024 * 1024
-        elif size < 5 * 1024 * 1024 * 1024:  # < 5GB
-            return 12, 2 * 1024 * 1024
-        else:  # >= 5GB
-            return 16, 4 * 1024 * 1024
-
     def download(self, url, dest_dir):
         filename, size, range_ok = self.get_info(url)
         filepath = os.path.join(dest_dir, filename)
@@ -99,26 +81,44 @@ class FileDownloader:
             name, ext = os.path.splitext(original_filepath)
             filepath = f"{name}_{counter}{ext}"
             counter += 1
-        
-        threads, chunk_size = self._optimal_threads_chunk(size)
 
-        if size > 0 and range_ok and threads > 1:
-            return self._multi(url, filepath, size, threads, chunk_size)
+        # Use 32 chunks for all files (except very small ones)
+        if size > 0 and range_ok and size > 10*1024*1024:  # > 10MB
+            return self._multi(url, filepath, size, 32, 1024*1024)  # 32 chunks, 1MB each
         else:
-            return self._single(url, filepath)
+            return self._single_with_anti_throttling(url, filepath)
 
-    def _single(self, url, filepath):
+    def _single_with_anti_throttling(self, url, filepath):
         session = self._create_session()
         try:
             with session.get(url, stream=True, timeout=self.config.timeout) as r:
                 r.raise_for_status()
                 total_size = int(r.headers.get('content-length', 0))
                 progress = DownloadProgress(total_size, os.path.basename(filepath))
+                
+                downloaded = 0
+                throttle_threshold_percentage = 0.92  # 92% threshold
+                throttle_detected = False
+                
                 with open(filepath, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
+                    for chunk in r.iter_content(chunk_size=64*1024):  # 64KB chunks
                         if chunk:
                             f.write(chunk)
+                            downloaded += len(chunk)
                             progress.update(len(chunk))
+                            
+                            # Specific percentage-based pause (anti-throttling)
+                            if total_size > 0 and not throttle_detected:
+                                percentage = downloaded / total_size
+                                if percentage >= throttle_threshold_percentage and percentage < throttle_threshold_percentage + 0.02:
+                                    logger.info(f"Anti-throttling: Strategic pause at {percentage:.1%}")
+                                    progress.close()
+                                    time.sleep(5)
+                                    progress = DownloadProgress(total_size, os.path.basename(filepath))
+                                    progress.update(downloaded)
+                                    logger.info("Resuming after strategic pause")
+                                    throttle_detected = True  # Prevent repeated triggering
+                
                 progress.close()
             logger.info(f"✓ {filepath}")
             return True
@@ -132,33 +132,16 @@ class FileDownloader:
         parts = self._make_chunks(size, threads)
 
         def dl_chunk(idx, start, end):
-            # Create a new session for each chunk to avoid connection issues
+            # Create a new session for each chunk
             session = self._create_session()
             headers = {'Range': f'bytes={start}-{end}'}
             temp_filepath = f"{filepath}.part{idx}"
             
             try:
-                # Check if part already exists and is complete
-                if os.path.exists(temp_filepath):
-                    existing_size = os.path.getsize(temp_filepath)
-                    if existing_size == (end - start + 1):
-                        logger.info(f"Chunk {idx} already downloaded")
-                        # Update progress for existing chunk
-                        try:
-                            self.progress.update(existing_size)
-                        except:
-                            pass
-                        session.close()
-                        return True
-                    elif existing_size > 0:
-                        # Resume from where it left off
-                        headers['Range'] = f'bytes={start + existing_size}-{end}'
-                
                 with session.get(url, headers=headers, stream=True, timeout=self.config.timeout) as r:
                     r.raise_for_status()
-                    mode = 'ab' if os.path.exists(temp_filepath) else 'wb'
-                    with open(temp_filepath, mode) as f:
-                        for chunk in r.iter_content(chunk_size=64*1024):  # Larger chunk size for better throughput
+                    with open(temp_filepath, 'wb') as f:
+                        for chunk in r.iter_content(chunk_size=64*1024):  # 64KB chunks
                             if chunk:
                                 f.write(chunk)
                                 try:
@@ -173,8 +156,9 @@ class FileDownloader:
                 session.close()
 
         self.progress = DownloadProgress(size, os.path.basename(filepath))
+        
         try:
-            with ThreadPoolExecutor(max_workers=min(threads, 8)) as ex:  # Reduced max workers
+            with ThreadPoolExecutor(max_workers=min(threads, 16)) as ex:  # Cap at 16 concurrent workers
                 results = list(ex.map(lambda c: dl_chunk(*c), parts))
         finally:
             self.progress.close()
