@@ -4,5 +4,4 @@ if __name__ == "__main__":
     try:
         DownloadManager().run()
     except KeyboardInterrupt:
-        print("
-Stopped by user.")
+        print("Stopped by user.")
