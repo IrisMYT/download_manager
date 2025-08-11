@@ -1,0 +1,7 @@
+{
+    "links_file": "list.txt",
+    "download_dir": "downloads",
+    "max_concurrent_downloads": 2,
+    "timeout": 60,
+    "retry_attempts": 5
+}
