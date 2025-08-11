@@ -22,36 +22,29 @@ class DownloadManager:
             logger.error("No links found in list file")
             return
 
-        # Process downloads sequentially (one at a time) to avoid server throttling
-        for link in links:
-            logger.info(f"Starting download: {link}")
-            success = self.downloader.download(link, self.config.download_dir)
-            if success:
-                logger.info(f"Completed: {link}")
-            else:
-                logger.error(f"Failed: {link}")
-                # Try one more time with single-threaded approach
-                logger.info(f"Retrying {link} with single-threaded approach...")
-                success = self._retry_single_threaded(link)
-                if success:
-                    logger.info(f"Retry successful: {link}")
+        logger.info(f"Starting download of {len(links)} files with {self.config.max_concurrent_downloads} concurrent downloads")
+        
+        # Process downloads sequentially to avoid server throttling
+        for i, link in enumerate(links):
+            logger.info(f"Downloading file {i+1}/{len(links)}: {link}")
+            try:
+                result = self.downloader.download(link, self.config.download_dir)
+                if result:
+                    logger.info(f"Successfully downloaded: {link}")
                 else:
-                    logger.error(f"Retry also failed: {link}")
-
-    def _retry_single_threaded(self, url):
-        """Fallback method using single-threaded download with enhanced anti-throttling"""
-        try:
-            downloader = FileDownloader(self.config)
-            return downloader._single_with_anti_throttling(url, self.config.download_dir)
-        except Exception as e:
-            logger.error(f"Retry failed: {e}")
-            return False
+                    logger.error(f"Failed to download: {link}")
+            except Exception as e:
+                logger.error(f"Exception downloading {link}: {e}")
 
     def _links(self):
         if not os.path.exists(self.config.links_file):
             with open(self.config.links_file, 'w') as f:
-                f.write("# One URL per line")
-
+                f.write("# One URL per line
+")
+            logger.info(f"Created empty links file: {self.config.links_file}")
             return []
+        
         with open(self.config.links_file, 'r') as f:
-            return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            links = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        logger.info(f"Loaded {len(links)} links from {self.config.links_file}")
+        return links
