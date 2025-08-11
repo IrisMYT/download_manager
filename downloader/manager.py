@@ -40,8 +40,7 @@ class DownloadManager:
     def _links(self):
         if not os.path.exists(self.config.links_file):
             with open(self.config.links_file, 'w') as f:
-                f.write("# One URL per line
-")
+                f.write("# One URL per line")
             logger.info(f"Created empty links file: {self.config.links_file}")
             return []
         
