@@ -13,8 +13,7 @@ def main():
         manager = DownloadManager()
         manager.run()
     except KeyboardInterrupt:
-        print("
-Download interrupted by user")
+        print("Download interrupted by user")
         sys.exit(1)
     except Exception as e:
         print(f"Error: {e}")
