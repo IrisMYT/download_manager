@@ -22,16 +22,30 @@ class DownloadManager:
             logger.error("No links found in list file")
             return
 
+        logger.info(f"Starting download of {len(links)} files with {self.config.max_concurrent_downloads} concurrent downloads")
+        
         with ThreadPoolExecutor(max_workers=self.config.max_concurrent_downloads) as pool:
-            futures = [pool.submit(self.downloader.download, link, self.config.download_dir) for link in links]
-            for f in as_completed(futures):
-                f.result()
+            futures = {pool.submit(self.downloader.download, link, self.config.download_dir): link for link in links}
+            for future in as_completed(futures):
+                url = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        logger.info(f"Successfully downloaded: {url}")
+                    else:
+                        logger.error(f"Failed to download: {url}")
+                except Exception as e:
+                    logger.error(f"Exception downloading {url}: {e}")
 
     def _links(self):
         if not os.path.exists(self.config.links_file):
             with open(self.config.links_file, 'w') as f:
-                f.write("# One URL per line")
-                
+                f.write("# One URL per line
+")
+            logger.info(f"Created empty links file: {self.config.links_file}")
             return []
+        
         with open(self.config.links_file, 'r') as f:
-            return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            links = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        logger.info(f"Loaded {len(links)} links from {self.config.links_file}")
+        return links

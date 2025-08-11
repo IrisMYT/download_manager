@@ -16,9 +16,9 @@ def load_config() -> DownloadConfig:
     defaults = {
         "links_file": "list.txt",
         "download_dir": "downloads",
-        "max_concurrent_downloads": 2,
-        "timeout": 60,
-        "retry_attempts": 5
+        "max_concurrent_downloads": 3,  # Reduced to prevent overwhelming server
+        "timeout": 120,  # Increased timeout
+        "retry_attempts": 3  # Reduced retries to prevent hanging
     }
 
     if not os.path.exists(CONFIG_FILE):
