@@ -1,24 +1,47 @@
-#!/usr/bin/env python3
-
+import uvicorn
+import logging
 import sys
 import os
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
-# Add the downloader package to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add backend to path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from downloader.manager import DownloadManager
+from backend.api import app
 
-def main():
-    try:
-        manager = DownloadManager()
-        manager.run()
-    except KeyboardInterrupt:
-        print("Download interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/download_manager.log'),
+        logging.StreamHandler()
+    ]
+)
+
+# Create necessary directories
+os.makedirs('logs', exist_ok=True)
+os.makedirs('downloads', exist_ok=True)
+os.makedirs('config', exist_ok=True)
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+
+# Serve index.html
+@app.get("/")
+async def read_index():
+    return FileResponse('frontend/templates/index.html')
 
 if __name__ == "__main__":
-    main()
-
+    print("Starting Download Manager...")
+    print("Open http://localhost:8000 in your browser")
+    
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+        reload=False
+    )
