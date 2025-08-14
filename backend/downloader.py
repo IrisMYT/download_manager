@@ -76,7 +76,7 @@ class FileDownloader:
         if 'filename=' in content_disposition:
             parts = content_disposition.split('filename=')
             if len(parts) > 1:
-                filename = parts[1].strip('"'')
+                filename = parts[1].strip('')
                 return unquote(filename)
         
         parsed = urlparse(url)
