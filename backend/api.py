@@ -162,9 +162,10 @@ async def retry_failed_downloads():
 async def get_config():
     """Get current configuration"""
     return {
-        "config": config_manager.get_config_dict(),
-        "settings": config_manager.get_settings_dict()
+        "config": config_manager.get_config(),  # Changed from get_config_dict()
+        "settings": config_manager.get_settings()  # Changed from get_settings_dict()
     }
+
 
 @app.put("/api/config")
 async def update_config(update: ConfigUpdate):

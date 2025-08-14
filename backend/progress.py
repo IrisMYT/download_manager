@@ -1,36 +1,48 @@
-from tqdm import tqdm
 import time
+from typing import Dict, Optional
+from dataclasses import dataclass
 
-class DownloadProgress:
-    def __init__(self, total_size, filename):
-        self.start_time = time.time()
-        try:
-            # Limit filename display length
-            display_name = filename[:50] + "..." if len(filename) > 50 else filename
-            self.pbar = tqdm(
-                total=total_size,
-                unit='B',
-                unit_scale=True,
-                unit_divisor=1024,
-                desc=display_name,
-                ascii=True,
-                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
-                miniters=1,
-                mininterval=0.5  # Update less frequently for better performance
-            )
-        except Exception:
-            self.pbar = None
+@dataclass
+class ProgressInfo:
+    task_id: str
+    downloaded: int
+    total: int
+    speed: float
+    progress: float
+    eta: int
 
-    def update(self, size):
-        try:
-            if self.pbar:
-                self.pbar.update(size)
-        except:
-            pass
+class ProgressTracker:
+    def __init__(self):
+        self.progress_data: Dict[str, ProgressInfo] = {}
+        self.last_update: Dict[str, float] = {}
 
-    def close(self):
-        try:
-            if self.pbar:
-                self.pbar.close()
-        except:
-            pass
+    def update(self, task_id: str, downloaded: int, total: int, speed: float):
+        """Update progress for a task"""
+        progress = (downloaded / total * 100) if total > 0 else 0
+        eta = int((total - downloaded) / speed) if speed > 0 else 0
+        
+        self.progress_data[task_id] = ProgressInfo(
+            task_id=task_id,
+            downloaded=downloaded,
+            total=total,
+            speed=speed,
+            progress=progress,
+            eta=eta
+        )
+        
+        self.last_update[task_id] = time.time()
+
+    def get(self, task_id: str) -> Optional[ProgressInfo]:
+        """Get progress for a task"""
+        return self.progress_data.get(task_id)
+
+    def remove(self, task_id: str):
+        """Remove progress data for a task"""
+        if task_id in self.progress_data:
+            del self.progress_data[task_id]
+        if task_id in self.last_update:
+            del self.last_update[task_id]
+
+    def get_all(self) -> Dict[str, ProgressInfo]:
+        """Get all progress data"""
+        return self.progress_data.copy()
