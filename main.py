@@ -32,12 +32,12 @@ app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
 # Serve index.html
 @app.get("/")
 async def read_index():
-    return FileResponse('frontend/templates/index.html')
+    return FileResponse('frontend/index.html')  # Changed from frontend/templates/index.html
 
 if __name__ == "__main__":
     print("Starting Download Manager...")
     print("Open http://localhost:8000 in your browser")
-    
+
     uvicorn.run(
         app,
         host="0.0.0.0",
