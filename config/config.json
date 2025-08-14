@@ -1,7 +1,6 @@
 {
-    "links_file": "/mnt/6tb/MYT/Anime/Download/list.txt",
     "download_dir": "/mnt/6tb/MYT/Anime/Download",
     "max_concurrent_downloads": 1,
-    "timeout": 180,
+    "timeout": 30,
     "retry_attempts": 3
 }
