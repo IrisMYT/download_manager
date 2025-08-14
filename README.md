@@ -129,7 +129,7 @@ For Fresh Installation on Blank System:
             
 
 bash
-git clone https://github.com/yourusername/download-manager
+git clone https://github.com/IrisMYT/download-manager
 cd download_manager
 chmod +x setup.sh
 ./setup.sh
@@ -140,7 +140,7 @@ Using ZIP download:
 
 bash
 # Download and extract the ZIP
-wget https://github.com/yourusername/download-manager/archive/main.zip
+wget https://github.com/IrisMYT/download-manager/archive/main.zip
 unzip main.zip
 cd download-manager-main
 chmod +x setup.sh
@@ -151,7 +151,7 @@ One-line installer:
         
 
     bash
-    curl -sSL https://raw.githubusercontent.com/yourusername/download-manager/main/install.sh | bash
+    curl -sSL https://raw.githubusercontent.com/IrisMYT/download-manager/main/install.sh | bash
 
 After Installation:
 
