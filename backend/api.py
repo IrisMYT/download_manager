@@ -183,8 +183,7 @@ async def import_links_file(file: UploadFile = File(...)):
     """Import links from a text file"""
     try:
         content = await file.read()
-        urls = content.decode('utf-8').strip().split('
-')
+        urls = content.decode('utf-8').strip().split('')
         urls = [url.strip() for url in urls if url.strip() and not url.startswith('#')]
         
         task_ids = download_manager.add_downloads_batch(urls)
